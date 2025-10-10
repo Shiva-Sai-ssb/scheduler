@@ -132,9 +132,32 @@ contract ScheduleERC20Transfer is AutomationCompatibleInterface, Ownable, Reentr
     {}
 
     function performUpkeep(bytes calldata performData) external override nonReentrant whenNotPaused {}
-    // External Functions
+
+    function pauseContract() external onlyOwner {
+        if (s_activeJobIds.length > 0) {
+            revert ScheduleERC20Transfer__CannotPauseWithActiveJobs();
+        }
+        _pause();
+    }
+
+    function unpauseContract() external onlyOwner {
+        _unpause();
+    }
+
     // Public Functions
     // Internal Functions
     // Private Functions
     // View Functions
+
+    function getActiveJobIds() external view returns (uint256[] memory) {
+        return s_activeJobIds;
+    }
+
+    function getAutomationForwarder() external view returns (address) {
+        return s_chainlinkAutomationForwarder;
+    }
+
+    function getActiveJobCount() external view returns (uint256) {
+        return s_activeJobIds.length;
+    }
 }
