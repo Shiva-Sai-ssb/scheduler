@@ -32,14 +32,86 @@ contract ScheduleERC20Transfer is AutomationCompatibleInterface, Ownable, Reentr
     error ScheduleERC20Transfer__CannotPauseWithActiveJobs();
     error ScheduleERC20Transfer__CannotUpdateAfterUnlockTime();
     error ScheduleERC20Transfer__InvalidAmountUpdate();
+
     // Structs
+    struct TransferJob {
+        address payerAddress;
+        address recipientAddress;
+        address tokenAddress;
+        uint256 transferAmount;
+        uint256 unlockTimestamp;
+        bool isExecuted;
+        bool isCancelled;
+    }
+
     // Constants
+    uint256 public constant MAXIMUM_BATCH_SIZE = 20;
+    uint256 private constant MAXIMUM_UINT256 = type(uint256).max;
+
     // State variables
+    uint256 public s_nextJobId;
+    uint256[] private s_activeJobIds;
+    mapping(uint256 => TransferJob) public s_jobIdToTransferJob;
+    mapping(uint256 => uint256) private s_jobIdToArrayIndex;
+    address public s_chainlinkAutomationForwarder;
+
     // Events
+    event TransferJobScheduled(
+        uint256 indexed jobId,
+        address indexed payer,
+        address indexed recipient,
+        address tokenAddress,
+        uint256 amount,
+        uint256 unlockTimestamp
+    );
+    event TransferJobExecuted(uint256 indexed jobId, address indexed recipient, address tokenAddress, uint256 amount);
+    event TransferJobCancelled(
+        uint256 indexed jobId, address indexed payer, address tokenAddress, uint256 refundAmount
+    );
+    event TransferJobUpdated(
+        uint256 indexed jobId,
+        address indexed oldRecipient,
+        address indexed newRecipient,
+        address tokenAddress,
+        uint256 oldAmount,
+        uint256 newAmount,
+        uint256 oldUnlockTimestamp,
+        uint256 newUnlockTimestamp
+    );
+    event EmergencyTokensWithdrawn(
+        address indexed owner, address indexed recipient, address tokenAddress, uint256 amount
+    );
+    event AutomationForwarderUpdated(address indexed oldForwarder, address indexed newForwarder);
+
     // Modifiers
+    modifier onlyWhenNotPaused() {
+        if (paused()) revert ScheduleERC20Transfer__ContractIsPaused();
+        _;
+    }
+
+    modifier onlyAutomationForwarder() {
+        if (msg.sender != s_chainlinkAutomationForwarder) {
+            revert ScheduleERC20Transfer__UnauthorizedAutomationCall();
+        }
+        _;
+    }
+
+    modifier onlyPayer(uint256 jobId) {
+        if (msg.sender != s_jobIdToTransferJob[jobId].payerAddress) {
+            revert ScheduleERC20Transfer__OnlyPayerCanCancel();
+        }
+        _;
+    }
+
+    modifier validAddress(address addressToCheck) {
+        if (addressToCheck == address(0)) revert ScheduleERC20Transfer__ZeroAddressNotAllowed();
+        _;
+    }
 
     // Constructor
-    constructor() Ownable(msg.sender) {}
+    constructor() Ownable(msg.sender) {
+        s_nextJobId = 1;
+    }
 
     // External Functions
     function checkUpkeep(bytes calldata /* checkData */ )

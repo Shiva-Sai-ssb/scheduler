@@ -39,10 +39,80 @@ contract ScheduleERC721Transfer is
     error ScheduleERC721Transfer__CannotUpdateAfterUnlockTime();
 
     // Structs
+    struct TransferJob {
+        address payerAddress;
+        address recipientAddress;
+        address nftContractAddress;
+        uint256 tokenId;
+        uint256 unlockTimestamp;
+        bool isExecuted;
+        bool isCancelled;
+    }
+
     // Constants
+    uint256 public constant MAX_BATCH_SIZE = 20;
+    uint256 private constant MAXIMUM_UINT256 = type(uint256).max;
+
     // State variables
+    uint256 public s_nextJobId;
+    uint256[] private s_activeJobIds;
+    mapping(uint256 => TransferJob) public s_jobIdToTransferJob;
+    mapping(uint256 => uint256) private s_jobIdToArrayIndex;
+    address public s_chainlinkAutomationForwarder;
+
     // Events
+    event TransferJobScheduled(
+        uint256 indexed jobId,
+        address indexed payer,
+        address indexed recipient,
+        address nftContractAddress,
+        uint256 tokenId,
+        uint256 unlockTimestamp
+    );
+    event TransferJobExecuted(
+        uint256 indexed jobId, address indexed recipient, address nftContractAddress, uint256 tokenId
+    );
+    event TransferJobCancelled(
+        uint256 indexed jobId, address indexed payer, address nftContractAddress, uint256 tokenId
+    );
+    event TransferJobUpdated(
+        uint256 indexed jobId,
+        address indexed oldRecipient,
+        address indexed newRecipient,
+        address nftContractAddress,
+        uint256 tokenId,
+        uint256 oldUnlockTimestamp,
+        uint256 newUnlockTimestamp
+    );
+    event EmergencyNFTWithdrawn(
+        address indexed owner, address indexed recipient, address nftContractAddress, uint256 tokenId
+    );
+    event AutomationForwarderUpdated(address indexed oldForwarder, address indexed newForwarder);
+
     // Modifiers
+    modifier onlyWhenNotPaused() {
+        if (paused()) revert ScheduleERC721Transfer__ContractIsPaused();
+        _;
+    }
+
+    modifier onlyAutomationForwarder() {
+        if (msg.sender != s_chainlinkAutomationForwarder) {
+            revert ScheduleERC721Transfer__UnauthorizedAutomationCall();
+        }
+        _;
+    }
+
+    modifier onlyPayer(uint256 jobId) {
+        if (msg.sender != s_jobIdToTransferJob[jobId].payerAddress) {
+            revert ScheduleERC721Transfer__OnlyPayerCanCancel();
+        }
+        _;
+    }
+
+    modifier validAddress(address addressToCheck) {
+        if (addressToCheck == address(0)) revert ScheduleERC721Transfer__ZeroAddressNotAllowed();
+        _;
+    }
 
     // Constructor
     constructor() Ownable(msg.sender) {}

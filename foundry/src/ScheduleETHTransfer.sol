@@ -30,14 +30,76 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
     error ScheduleETHTransfer__InvalidAmountUpdate();
 
     // Structs
+    struct TransferJob {
+        address payerAddress;
+        address payable recipientAddress;
+        uint256 transferAmount;
+        uint256 unlockTimestamp;
+        bool isExecuted;
+        bool isCancelled;
+    }
+
     // Constants
+    uint256 public constant MAX_BATCH_SIZE = 20;
+    uint256 private constant MAXIMUM_UINT256 = type(uint256).max;
+
     // State variables
+    uint256 public s_nextJobId;
+    uint256[] private s_activeJobIds;
+    mapping(uint256 => TransferJob) public s_jobIdToTransferJob;
+    mapping(uint256 => uint256) private s_jobIdToArrayIndex;
+    address public s_chainlinkAutomationForwarder;
+
     // Events
+    event TransferJobScheduled(
+        uint256 indexed jobId, address indexed payer, address indexed recipient, uint256 amount, uint256 unlockTimestamp
+    );
+    event TransferJobExecuted(uint256 indexed jobId, address indexed recipient, uint256 amount);
+    event TransferJobCancelled(uint256 indexed jobId, address indexed payer, uint256 refundAmount);
+    event TransferJobUpdated(
+        uint256 indexed jobId,
+        address indexed oldRecipient,
+        address indexed newRecipient,
+        uint256 oldAmount,
+        uint256 newAmount,
+        uint256 oldUnlockTimestamp,
+        uint256 newUnlockTimestamp
+    );
+    event EmergencyFundsWithdrawn(address indexed owner, address indexed recipient, uint256 amount);
+    event ChainlinkAutomationForwarderUpdated(address indexed oldForwarder, address indexed newForwarder);
+
     // Modifiers
+    modifier onlyWhenNotPaused() {
+        if (paused()) {
+            revert ScheduleETHTransfer__ContractIsPaused();
+        }
+        _;
+    }
+
+    modifier onlyChainlinkAutomationForwarder() {
+        if (msg.sender != s_chainlinkAutomationForwarder) {
+            revert ScheduleETHTransfer__UnauthorizedAutomationCall();
+        }
+        _;
+    }
+
+    modifier onlyPayer(uint256 jobId) {
+        if (msg.sender != s_jobIdToTransferJob[jobId].payerAddress) {
+            revert ScheduleETHTransfer__OnlyPayerCanCancel();
+        }
+        _;
+    }
+
+    modifier validAddress(address addressToCheck) {
+        if (addressToCheck == address(0)) {
+            revert ScheduleETHTransfer__ZeroAddressNotAllowed();
+        }
+        _;
+    }
 
     // Constructor
     constructor() Ownable(msg.sender) {
-        // Initialization code if needed
+        s_nextJobId = 1;
     }
 
     // External Functions
