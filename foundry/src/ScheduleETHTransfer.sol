@@ -113,6 +113,64 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         emit ChainlinkAutomationForwarderUpdated(oldForwarder, _newforwarderAddress);
     }
 
+    function scheduleEthTransfer(address payable _recipientAddress, uint256 _unlockTimestamp)
+        external
+        payable
+        onlyWhenNotPaused
+        validAddress(_recipientAddress)
+        returns (uint256 jobId)
+    {
+        if (msg.value == 0) revert ScheduleETHTransfer__NoEtherSent();
+        if (_unlockTimestamp <= block.timestamp) revert ScheduleETHTransfer__UnlockTimeAlreadyPassed();
+
+        jobId = s_nextJobId++;
+
+        TransferJob memory newJob = TransferJob({
+            payerAddress: msg.sender,
+            recipientAddress: _recipientAddress,
+            transferAmount: msg.value,
+            unlockTimestamp: _unlockTimestamp,
+            isExecuted: false,
+            isCancelled: false
+        });
+
+        s_jobIdToTransferJob[jobId] = newJob;
+        s_activeJobIds.push(jobId);
+        s_jobIdToArrayIndex[jobId] = s_activeJobIds.length - 1;
+
+        emit TransferJobScheduled(jobId, msg.sender, _recipientAddress, msg.value, _unlockTimestamp);
+    }
+
+    function cancelScheduledTransfer(uint256 _jobId) external nonReentrant onlyPayer(_jobId) {
+        TransferJob storage job = s_jobIdToTransferJob[_jobId];
+
+        if (job.payerAddress == address(0)) revert ScheduleETHTransfer__TransferJobNotFound();
+        if (job.isExecuted) revert ScheduleETHTransfer__TransferAlreadyExecuted();
+        if (job.isCancelled) revert ScheduleETHTransfer__TransferAlreadyCancelled();
+        if (msg.sender != job.payerAddress) revert ScheduleETHTransfer__OnlyPayerCanCancel();
+        if (block.timestamp >= job.unlockTimestamp) revert ScheduleETHTransfer__CancellationPeriodEnded();
+
+        job.isCancelled = true;
+        uint256 refundAmount = job.transferAmount;
+        job.transferAmount = 0;
+
+        // Remove job from active jobs array
+        uint256 index = s_jobIdToArrayIndex[_jobId];
+        uint256 lastIndex = s_activeJobIds.length - 1;
+        if (index != lastIndex) {
+            s_activeJobIds[index] = s_activeJobIds[lastIndex];
+            s_jobIdToArrayIndex[s_activeJobIds[index]] = index;
+        }
+        s_activeJobIds.pop();
+        delete s_jobIdToArrayIndex[_jobId];
+
+        // Refund the payer
+        (bool refundSuccess,) = msg.sender.call{value: refundAmount}("");
+        if (!refundSuccess) revert ScheduleETHTransfer__EtherRefundFailed();
+
+        emit TransferJobCancelled(_jobId, msg.sender, refundAmount);
+    }
+
     function checkUpkeep(bytes calldata /* checkData */ )
         external
         view
