@@ -87,7 +87,7 @@ contract ScheduleERC721Transfer is
     event EmergencyNFTWithdrawn(
         address indexed owner, address indexed recipient, address nftContractAddress, uint256 tokenId
     );
-    event AutomationForwarderUpdated(address indexed oldForwarder, address indexed newForwarder);
+    event ChainlinkAutomationForwarderUpdated(address indexed oldForwarder, address indexed newForwarder);
 
     // Modifiers
     modifier onlyWhenNotPaused() {
@@ -115,9 +115,21 @@ contract ScheduleERC721Transfer is
     }
 
     // Constructor
-    constructor() Ownable(msg.sender) {}
+    constructor() Ownable(msg.sender) {
+        s_nextJobId = 1;
+    }
 
     // External Functions
+    function setChainlinkAutomationForwarder(address _newforwarderAddress)
+        external
+        onlyOwner
+        validAddress(_newforwarderAddress)
+    {
+        address oldForwarder = s_chainlinkAutomationForwarder;
+        s_chainlinkAutomationForwarder = _newforwarderAddress;
+        emit ChainlinkAutomationForwarderUpdated(oldForwarder, _newforwarderAddress);
+    }
+
     function checkUpkeep(bytes calldata /* checkData */ )
         external
         view

@@ -103,6 +103,16 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
     }
 
     // External Functions
+    function setChainlinkAutomationForwarder(address _newforwarderAddress)
+        external
+        onlyOwner
+        validAddress(_newforwarderAddress)
+    {
+        address oldForwarder = s_chainlinkAutomationForwarder;
+        s_chainlinkAutomationForwarder = _newforwarderAddress;
+        emit ChainlinkAutomationForwarderUpdated(oldForwarder, _newforwarderAddress);
+    }
+
     function checkUpkeep(bytes calldata /* checkData */ )
         external
         view

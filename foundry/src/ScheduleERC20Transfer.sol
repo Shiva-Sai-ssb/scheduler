@@ -81,7 +81,7 @@ contract ScheduleERC20Transfer is AutomationCompatibleInterface, Ownable, Reentr
     event EmergencyTokensWithdrawn(
         address indexed owner, address indexed recipient, address tokenAddress, uint256 amount
     );
-    event AutomationForwarderUpdated(address indexed oldForwarder, address indexed newForwarder);
+    event ChainlinkAutomationForwarderUpdated(address indexed oldForwarder, address indexed newForwarder);
 
     // Modifiers
     modifier onlyWhenNotPaused() {
@@ -114,6 +114,16 @@ contract ScheduleERC20Transfer is AutomationCompatibleInterface, Ownable, Reentr
     }
 
     // External Functions
+    function setChainlinkAutomationForwarder(address _newforwarderAddress)
+        external
+        onlyOwner
+        validAddress(_newforwarderAddress)
+    {
+        address oldForwarder = s_chainlinkAutomationForwarder;
+        s_chainlinkAutomationForwarder = _newforwarderAddress;
+        emit ChainlinkAutomationForwarderUpdated(oldForwarder, _newforwarderAddress);
+    }
+
     function checkUpkeep(bytes calldata /* checkData */ )
         external
         view
