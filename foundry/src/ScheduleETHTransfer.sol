@@ -185,17 +185,17 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         if (transferJob.isCancelled) revert ScheduleETHTransfer__TransferAlreadyCancelled();
         if (msg.sender != transferJob.payerAddress) revert ScheduleETHTransfer__OnlyPayerCanCancel();
 
-        if (block.timestamp >= transferJob.scheduleUnlockTimestamp) {
+        if (block.timestamp >= transferJob.unlockTimestamp) {
             revert ScheduleETHTransfer__CannotUpdateAfterUnlockTime();
         }
 
-        if (_newUnlockTimestamp <= block.timestamp) revert ScheduleETHTransfer__UnlockTimeInThePast();
+        if (_newUnlockTimestamp <= block.timestamp) revert ScheduleETHTransfer__UnlockTimeAlreadyPassed();
 
-        if (_newAmount == 0) revert ScheduleETHTransfer__NoEtherProvided();
+        if (_newAmount == 0) revert ScheduleETHTransfer__NoEtherSent();
 
         uint256 oldAmount = transferJob.transferAmount;
         address oldRecipient = transferJob.recipientAddress;
-        uint256 oldUnlockTime = transferJob.scheduleUnlockTimestamp;
+        uint256 oldUnlockTime = transferJob.unlockTimestamp;
 
         if (_newAmount > oldAmount) {
             uint256 amountDifference = _newAmount - oldAmount;
@@ -218,7 +218,7 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
 
         transferJob.recipientAddress = _newRecipientAddress;
         transferJob.transferAmount = _newAmount;
-        transferJob.scheduleUnlockTimestamp = _newUnlockTimestamp;
+        transferJob.unlockTimestamp = _newUnlockTimestamp;
 
         emit TransferJobUpdated(
             _jobId, oldRecipient, _newRecipientAddress, oldAmount, _newAmount, oldUnlockTime, _newUnlockTimestamp
