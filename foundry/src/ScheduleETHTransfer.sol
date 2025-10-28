@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.28;
 
-import {AutomationCompatibleInterface} from
-    "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+import {
+    AutomationCompatibleInterface
+} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -171,7 +172,62 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         emit TransferJobCancelled(_jobId, msg.sender, refundAmount);
     }
 
-    function checkUpkeep(bytes calldata /* checkData */ )
+    function updateScheduledTransfer(
+        uint256 _jobId,
+        address payable _newRecipientAddress,
+        uint256 _newAmount,
+        uint256 _newUnlockTimestamp
+    ) external payable onlyWhenNotPaused nonReentrant validAddress(_newRecipientAddress) {
+        TransferJob storage transferJob = s_jobIdToTransferJob[_jobId];
+
+        if (transferJob.payerAddress == address(0)) revert ScheduleETHTransfer__TransferJobNotFound();
+        if (transferJob.isExecuted) revert ScheduleETHTransfer__TransferAlreadyExecuted();
+        if (transferJob.isCancelled) revert ScheduleETHTransfer__TransferAlreadyCancelled();
+        if (msg.sender != transferJob.payerAddress) revert ScheduleETHTransfer__OnlyPayerCanCancel();
+
+        if (block.timestamp >= transferJob.scheduleUnlockTimestamp) {
+            revert ScheduleETHTransfer__CannotUpdateAfterUnlockTime();
+        }
+
+        if (_newUnlockTimestamp <= block.timestamp) revert ScheduleETHTransfer__UnlockTimeInThePast();
+
+        if (_newAmount == 0) revert ScheduleETHTransfer__NoEtherProvided();
+
+        uint256 oldAmount = transferJob.transferAmount;
+        address oldRecipient = transferJob.recipientAddress;
+        uint256 oldUnlockTime = transferJob.scheduleUnlockTimestamp;
+
+        if (_newAmount > oldAmount) {
+            uint256 amountDifference = _newAmount - oldAmount;
+            if (msg.value != amountDifference) {
+                revert ScheduleETHTransfer__InvalidAmountUpdate();
+            }
+        } else if (_newAmount < oldAmount) {
+            if (msg.value != 0) {
+                revert ScheduleETHTransfer__InvalidAmountUpdate();
+            }
+            uint256 refundAmount = oldAmount - _newAmount;
+
+            (bool refundSuccess,) = transferJob.payerAddress.call{value: refundAmount}("");
+            if (!refundSuccess) revert ScheduleETHTransfer__EtherRefundFailed();
+        } else {
+            if (msg.value != 0) {
+                revert ScheduleETHTransfer__InvalidAmountUpdate();
+            }
+        }
+
+        transferJob.recipientAddress = _newRecipientAddress;
+        transferJob.transferAmount = _newAmount;
+        transferJob.scheduleUnlockTimestamp = _newUnlockTimestamp;
+
+        emit TransferJobUpdated(
+            _jobId, oldRecipient, _newRecipientAddress, oldAmount, _newAmount, oldUnlockTime, _newUnlockTimestamp
+        );
+    }
+
+    function checkUpkeep(
+        bytes calldata /* checkData */
+    )
         external
         view
         override
