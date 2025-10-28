@@ -247,6 +247,22 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         _unpause();
     }
 
+    function emergencyWithdrawFunds(address payable _recipientAddress, uint256 _withdrawalAmount)
+        external
+        onlyOwner
+        nonReentrant
+        validAddress(_recipientAddress)
+    {
+        if (_withdrawalAmount > address(this).balance) {
+            revert ScheduleETHTransfer__InsufficientBalance();
+        }
+
+        (bool withdrawalSuccess,) = _recipientAddress.call{value: _withdrawalAmount}("");
+        if (!withdrawalSuccess) revert ScheduleETHTransfer__EtherTransferFailed();
+
+        emit EmergencyFundsWithdrawn(msg.sender, _recipientAddress, _withdrawalAmount);
+    }
+
     // Public Functions
     // Internal Functions
     // Private Functions
