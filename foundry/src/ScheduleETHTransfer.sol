@@ -232,7 +232,31 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         view
         override
         returns (bool upkeepNeeded, bytes memory performData)
-    {}
+    {
+        if (paused() || s_activeJobIds.length == 0) {
+            return (false, bytes(""));
+        }
+
+        uint256[] memory readyJobIds = new uint256[](MAX_BATCH_SIZE);
+        uint256 readyJobCount = 0;
+
+        for (uint256 i = 0; i < s_activeJobIds.length && readyJobCount < MAX_BATCH_SIZE; i++) {
+            uint256 currentJobId = s_activeJobIds[i];
+            TransferJob storage currentJob = s_jobIdToTransferJob[currentJobId];
+
+            if (_isJobReadyForExecution(currentJob)) {
+                readyJobIds[readyJobCount] = currentJobId;
+                readyJobCount++;
+            }
+        }
+
+        if (readyJobCount == 0) {
+            return (false, bytes(""));
+        }
+
+        performData = _encodePerformData(readyJobIds, readyJobCount);
+        return (true, performData);
+    }
 
     function performUpkeep(bytes calldata performData) external override nonReentrant whenNotPaused {}
 
@@ -265,6 +289,18 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
 
     // Public Functions
     // Internal Functions
+    function _isJobReadyForExecution(TransferJob storage _job) internal view returns (bool) {
+        return !_job.isExecuted && !_job.isCancelled && block.timestamp >= _job.unlockTimestamp;
+    }
+
+    function _encodePerformData(uint256[] memory _jobIds, uint256 _count) internal pure returns (bytes memory) {
+        bytes memory encodedData = abi.encodePacked(uint8(_count));
+        for (uint256 i = 0; i < _count; i++) {
+            encodedData = abi.encodePacked(encodedData, _jobIds[i]);
+        }
+        return encodedData;
+    }
+
     // Private Functions
     // View Functions
 
