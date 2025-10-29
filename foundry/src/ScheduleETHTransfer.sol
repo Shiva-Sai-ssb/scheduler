@@ -258,7 +258,17 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         return (true, performData);
     }
 
-    function performUpkeep(bytes calldata performData) external override nonReentrant whenNotPaused {}
+    function performUpkeep(bytes calldata performData) external override nonReentrant onlyChainlinkAutomationForwarder {
+        if (paused()) revert ScheduleETHTransfer__ContractIsPaused();
+        if (performData.length < 1) revert ScheduleETHTransfer__InvalidPerformData();
+
+        uint8 batchSize = uint8(bytes1(performData[0]));
+        if (batchSize == 0 || batchSize > MAX_BATCH_SIZE) {
+            revert ScheduleETHTransfer__BatchSizeExceedsLimit();
+        }
+
+        _executeBatchTransfers(performData, batchSize);
+    }
 
     function pauseContract() external onlyOwner {
         if (s_activeJobIds.length > 0) {
@@ -299,6 +309,59 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
             encodedData = abi.encodePacked(encodedData, _jobIds[i]);
         }
         return encodedData;
+    }
+
+    function _executeBatchTransfers(bytes calldata performData, uint8 batchSize) internal {
+        uint256 dataOffset = 1;
+
+        for (uint256 i = 0; i < batchSize; i++) {
+            uint256 jobId;
+            assembly {
+                jobId := calldataload(add(performData.offset, dataOffset))
+            }
+            dataOffset += 32;
+
+            _executeTransferJob(jobId);
+        }
+    }
+
+    function _executeTransferJob(uint256 _jobId) internal {
+        TransferJob storage transferJob = s_jobIdToTransferJob[_jobId];
+
+        if (
+            transferJob.payerAddress == address(0) || transferJob.isExecuted || transferJob.isCancelled
+                || block.timestamp < transferJob.unlockTimestamp
+        ) {
+            return;
+        }
+
+        transferJob.isExecuted = true;
+        uint256 transferAmount = transferJob.transferAmount;
+        transferJob.transferAmount = 0;
+
+        _removeJobFromActiveList(_jobId);
+
+        (bool transferSuccess,) = transferJob.recipientAddress.call{value: transferAmount}("");
+        if (!transferSuccess) revert ScheduleETHTransfer__EtherTransferFailed();
+
+        emit TransferJobExecuted(_jobId, transferJob.recipientAddress, transferAmount);
+    }
+
+    function _removeJobFromActiveList(uint256 _jobId) internal {
+        uint256 arrayLength = s_activeJobIds.length;
+        if (arrayLength == 0) return;
+
+        uint256 jobIndex = s_jobIdToArrayIndex[_jobId];
+        uint256 lastIndex = arrayLength - 1;
+
+        if (jobIndex != lastIndex) {
+            uint256 lastJobId = s_activeJobIds[lastIndex];
+            s_activeJobIds[jobIndex] = lastJobId;
+            s_jobIdToArrayIndex[lastJobId] = jobIndex;
+        }
+
+        s_activeJobIds.pop();
+        delete s_jobIdToArrayIndex[_jobId];
     }
 
     // Private Functions
