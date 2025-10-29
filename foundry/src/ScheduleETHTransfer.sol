@@ -304,6 +304,45 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
     // Private Functions
     // View Functions
 
+    function getNextUnlockTimestamp() external view returns (uint256) {
+        if (s_activeJobIds.length == 0) return 0;
+
+        uint256 earliestTimestamp = MAXIMUM_UINT256;
+
+        for (uint256 i = 0; i < s_activeJobIds.length; i++) {
+            uint256 currentJobId = s_activeJobIds[i];
+            TransferJob storage currentJob = s_jobIdToTransferJob[currentJobId];
+
+            if (!currentJob.isExecuted && !currentJob.isCancelled && currentJob.unlockTimestamp < earliestTimestamp) {
+                earliestTimestamp = currentJob.unlockTimestamp;
+            }
+        }
+
+        return earliestTimestamp == MAXIMUM_UINT256 ? 0 : earliestTimestamp;
+    }
+
+    function getTransferJobDetails(uint256 _jobId)
+        external
+        view
+        returns (address payer, address recipient, uint256 amount, uint256 unlockTime, bool executed, bool cancelled)
+    {
+        TransferJob storage job = s_jobIdToTransferJob[_jobId];
+        return (
+            job.payerAddress,
+            job.recipientAddress,
+            job.transferAmount,
+            job.unlockTimestamp,
+            job.isExecuted,
+            job.isCancelled
+        );
+    }
+
+    function isJobValid(uint256 _jobId) external view returns (bool exists, bool isActive) {
+        TransferJob storage job = s_jobIdToTransferJob[_jobId];
+        exists = job.payerAddress != address(0);
+        isActive = exists && !job.isExecuted && !job.isCancelled;
+    }
+
     function getActiveJobIds() external view returns (uint256[] memory) {
         return s_activeJobIds;
     }
