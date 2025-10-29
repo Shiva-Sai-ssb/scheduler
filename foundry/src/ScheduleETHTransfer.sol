@@ -101,6 +101,9 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
 
     // Constructor
     constructor(address _forwarderAddress) Ownable(msg.sender) {
+        if (_forwarderAddress == address(0)) {
+            revert ScheduleETHTransfer__ZeroAddressNotAllowed();
+        }
         s_nextJobId = 1;
         s_chainlinkAutomationForwarder = _forwarderAddress;
     }
