@@ -156,14 +156,7 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         job.transferAmount = 0;
 
         // Remove job from active jobs array
-        uint256 index = s_jobIdToArrayIndex[_jobId];
-        uint256 lastIndex = s_activeJobIds.length - 1;
-        if (index != lastIndex) {
-            s_activeJobIds[index] = s_activeJobIds[lastIndex];
-            s_jobIdToArrayIndex[s_activeJobIds[index]] = index;
-        }
-        s_activeJobIds.pop();
-        delete s_jobIdToArrayIndex[_jobId];
+        _removeJobFromActiveList(_jobId);
 
         // Refund the payer
         (bool refundSuccess,) = msg.sender.call{value: refundAmount}("");
