@@ -29,6 +29,7 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
     error ScheduleETHTransfer__CannotPauseWithActiveJobs();
     error ScheduleETHTransfer__CannotUpdateAfterUnlockTime();
     error ScheduleETHTransfer__InvalidAmountUpdate();
+    error ScheduleETHTransfer__OnlyPayerCanUpdate();
 
     // Structs
     struct TransferJob {
@@ -99,8 +100,9 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
     }
 
     // Constructor
-    constructor() Ownable(msg.sender) {
+    constructor(address _forwarderAddress) Ownable(msg.sender) {
         s_nextJobId = 1;
+        s_chainlinkAutomationForwarder = _forwarderAddress;
     }
 
     // External Functions
@@ -155,28 +157,27 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         uint256 refundAmount = job.transferAmount;
         job.transferAmount = 0;
 
-        // Remove job from active jobs array
         _removeJobFromActiveList(_jobId);
 
-        // Refund the payer
         (bool refundSuccess,) = msg.sender.call{value: refundAmount}("");
         if (!refundSuccess) revert ScheduleETHTransfer__EtherRefundFailed();
 
         emit TransferJobCancelled(_jobId, msg.sender, refundAmount);
     }
 
-    function updateScheduledTransfer(
-        uint256 _jobId,
-        address payable _newRecipientAddress,
-        uint256 _newAmount,
-        uint256 _newUnlockTimestamp
-    ) external payable onlyWhenNotPaused nonReentrant validAddress(_newRecipientAddress) {
+    function updateScheduledTransfer(uint256 _jobId, address payable _newRecipientAddress, uint256 _newUnlockTimestamp)
+        external
+        payable
+        onlyWhenNotPaused
+        nonReentrant
+        validAddress(_newRecipientAddress)
+    {
         TransferJob storage transferJob = s_jobIdToTransferJob[_jobId];
 
         if (transferJob.payerAddress == address(0)) revert ScheduleETHTransfer__TransferJobNotFound();
         if (transferJob.isExecuted) revert ScheduleETHTransfer__TransferAlreadyExecuted();
         if (transferJob.isCancelled) revert ScheduleETHTransfer__TransferAlreadyCancelled();
-        if (msg.sender != transferJob.payerAddress) revert ScheduleETHTransfer__OnlyPayerCanCancel();
+        if (msg.sender != transferJob.payerAddress) revert ScheduleETHTransfer__OnlyPayerCanUpdate();
 
         if (block.timestamp >= transferJob.unlockTimestamp) {
             revert ScheduleETHTransfer__CannotUpdateAfterUnlockTime();
@@ -184,37 +185,26 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
 
         if (_newUnlockTimestamp <= block.timestamp) revert ScheduleETHTransfer__UnlockTimeAlreadyPassed();
 
-        if (_newAmount == 0) revert ScheduleETHTransfer__NoEtherSent();
-
         uint256 oldAmount = transferJob.transferAmount;
         address oldRecipient = transferJob.recipientAddress;
         uint256 oldUnlockTime = transferJob.unlockTimestamp;
+        uint256 newAmount = oldAmount;
 
-        if (_newAmount > oldAmount) {
-            uint256 amountDifference = _newAmount - oldAmount;
-            if (msg.value != amountDifference) {
-                revert ScheduleETHTransfer__InvalidAmountUpdate();
-            }
-        } else if (_newAmount < oldAmount) {
-            if (msg.value != 0) {
-                revert ScheduleETHTransfer__InvalidAmountUpdate();
-            }
-            uint256 refundAmount = oldAmount - _newAmount;
-
-            (bool refundSuccess,) = transferJob.payerAddress.call{value: refundAmount}("");
-            if (!refundSuccess) revert ScheduleETHTransfer__EtherRefundFailed();
-        } else {
-            if (msg.value != 0) {
-                revert ScheduleETHTransfer__InvalidAmountUpdate();
+        if (msg.value > 0) {
+            newAmount = msg.value;
+            if (newAmount < oldAmount) {
+                uint256 refundAmount = oldAmount - newAmount;
+                (bool refundSuccess,) = transferJob.payerAddress.call{value: refundAmount}("");
+                if (!refundSuccess) revert ScheduleETHTransfer__EtherRefundFailed();
             }
         }
 
         transferJob.recipientAddress = _newRecipientAddress;
-        transferJob.transferAmount = _newAmount;
+        transferJob.transferAmount = newAmount;
         transferJob.unlockTimestamp = _newUnlockTimestamp;
 
         emit TransferJobUpdated(
-            _jobId, oldRecipient, _newRecipientAddress, oldAmount, _newAmount, oldUnlockTime, _newUnlockTimestamp
+            _jobId, oldRecipient, _newRecipientAddress, oldAmount, newAmount, oldUnlockTime, _newUnlockTimestamp
         );
     }
 
@@ -290,7 +280,6 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         emit EmergencyFundsWithdrawn(msg.sender, _recipientAddress, _withdrawalAmount);
     }
 
-    // Public Functions
     // Internal Functions
     function _isJobReadyForExecution(TransferJob storage _job) internal view returns (bool) {
         return !_job.isExecuted && !_job.isCancelled && block.timestamp >= _job.unlockTimestamp;
@@ -357,9 +346,7 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         delete s_jobIdToArrayIndex[_jobId];
     }
 
-    // Private Functions
     // View Functions
-
     function getNextUnlockTimestamp() external view returns (uint256) {
         if (s_activeJobIds.length == 0) return 0;
 
