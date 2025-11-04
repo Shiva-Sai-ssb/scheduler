@@ -168,47 +168,55 @@ contract ScheduleETHTransfer is AutomationCompatibleInterface, Ownable, Reentran
         emit TransferJobCancelled(_jobId, msg.sender, refundAmount);
     }
 
-    function updateScheduledTransfer(uint256 _jobId, address payable _newRecipientAddress, uint256 _newUnlockTimestamp)
+    function updateScheduledTransfer(
+        uint256 _jobId, 
+        address payable _newRecipientAddress, 
+        uint256 _newUnlockTimestamp,
+        uint256 _newAmount
+    )
         external
         payable
         onlyWhenNotPaused
         nonReentrant
         validAddress(_newRecipientAddress)
     {
-        TransferJob storage transferJob = s_jobIdToTransferJob[_jobId];
+        TransferJob storage job = s_jobIdToTransferJob[_jobId];
 
-        if (transferJob.payerAddress == address(0)) revert ScheduleETHTransfer__TransferJobNotFound();
-        if (transferJob.isExecuted) revert ScheduleETHTransfer__TransferAlreadyExecuted();
-        if (transferJob.isCancelled) revert ScheduleETHTransfer__TransferAlreadyCancelled();
-        if (msg.sender != transferJob.payerAddress) revert ScheduleETHTransfer__OnlyPayerCanUpdate();
-
-        if (block.timestamp >= transferJob.unlockTimestamp) {
-            revert ScheduleETHTransfer__CannotUpdateAfterUnlockTime();
-        }
-
+        if (job.payerAddress == address(0)) revert ScheduleETHTransfer__TransferJobNotFound();
+        if (job.isExecuted) revert ScheduleETHTransfer__TransferAlreadyExecuted();
+        if (job.isCancelled) revert ScheduleETHTransfer__TransferAlreadyCancelled();
+        if (msg.sender != job.payerAddress) revert ScheduleETHTransfer__OnlyPayerCanUpdate();
+        if (block.timestamp >= job.unlockTimestamp) revert ScheduleETHTransfer__CannotUpdateAfterUnlockTime();
         if (_newUnlockTimestamp <= block.timestamp) revert ScheduleETHTransfer__UnlockTimeAlreadyPassed();
 
-        uint256 oldAmount = transferJob.transferAmount;
-        address oldRecipient = transferJob.recipientAddress;
-        uint256 oldUnlockTime = transferJob.unlockTimestamp;
-        uint256 newAmount = oldAmount;
+        uint256 oldAmount = job.transferAmount;
+        uint256 finalAmount = oldAmount;
 
-        if (msg.value > 0) {
-            newAmount = msg.value;
-            if (newAmount < oldAmount) {
-                uint256 refundAmount = oldAmount - newAmount;
-                (bool refundSuccess,) = transferJob.payerAddress.call{value: refundAmount}("");
-                if (!refundSuccess) revert ScheduleETHTransfer__EtherRefundFailed();
+        if (_newAmount > 0 && _newAmount != oldAmount) {
+            if (_newAmount > oldAmount) {
+                uint256 difference = _newAmount - oldAmount;
+                if (msg.value != difference) revert ScheduleETHTransfer__InvalidAmountUpdate();
+                finalAmount = _newAmount;
+            } else {
+                if (msg.value > 0) revert ScheduleETHTransfer__InvalidAmountUpdate();
+                uint256 refundAmount = oldAmount - _newAmount;
+                finalAmount = _newAmount;
+                
+                (bool success,) = job.payerAddress.call{value: refundAmount}("");
+                if (!success) revert ScheduleETHTransfer__EtherRefundFailed();
             }
+        } else {
+            if (msg.value > 0) revert ScheduleETHTransfer__InvalidAmountUpdate();
         }
 
-        transferJob.recipientAddress = _newRecipientAddress;
-        transferJob.transferAmount = newAmount;
-        transferJob.unlockTimestamp = _newUnlockTimestamp;
+        address oldRecipient = job.recipientAddress;
+        uint256 oldUnlockTime = job.unlockTimestamp;
 
-        emit TransferJobUpdated(
-            _jobId, oldRecipient, _newRecipientAddress, oldAmount, newAmount, oldUnlockTime, _newUnlockTimestamp
-        );
+        job.recipientAddress = _newRecipientAddress;
+        job.transferAmount = finalAmount;
+        job.unlockTimestamp = _newUnlockTimestamp;
+
+        emit TransferJobUpdated(_jobId, oldRecipient, _newRecipientAddress, oldAmount, finalAmount, oldUnlockTime, _newUnlockTimestamp);
     }
 
     function checkUpkeep(
